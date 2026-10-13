@@ -22,41 +22,58 @@
 
 ## Installation
 
-### PowerShell Script
+### 1. PowerShell One-Liner (Zero-Clone)
+
+Run in PowerShell to automatically install the latest release to `$HOME\.local\bin` and add it to your User `PATH`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\packaging\install.ps1
+irm https://raw.githubusercontent.com/gilnett/wstrace/main/packaging/install.ps1 | iex
 ```
 
-Installs `wstrace.exe` to `$HOME\.local\bin` and registers the directory into the User `PATH` environment variable.
+### 2. Standalone Binary (GitHub Releases)
 
-### Windows Package Manager (Winget)
+Download precompiled standalone binaries from [GitHub Releases](https://github.com/gilnett/wstrace/releases).
 
-```cmd
-winget install gilnett.wstrace
+### 3. Cargo (From Source)
+
+Install directly from GitHub:
+
+```powershell
+cargo install --git https://github.com/gilnett/wstrace.git
 ```
 
-### Scoop
+Or build locally from a cloned repository:
 
-```cmd
-scoop install packaging/scoop/wstrace.json
-```
-
-### Cargo (From Source)
-
-```bash
-cargo install --path .
-```
-
-### Prebuilt Binary
-
-Compile directly using the Rust toolchain:
-
-```bash
+```powershell
 cargo build --release
 ```
 
-The resulting standalone executable is located at `target\release\wstrace.exe`.
+The resulting binary is located at `target\release\wstrace.exe`.
+
+### 4. Package Managers (Winget & Scoop)
+
+> [!NOTE]
+> Winget and Scoop manifests are synchronized automatically with published GitHub Releases.
+
+#### Windows Package Manager (Winget)
+
+Once published in the official [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) repository:
+
+```powershell
+winget install gilnett.wstrace
+```
+
+To test locally using the repository manifest:
+
+```powershell
+winget install --manifest .\packaging\winget\wstrace.yaml
+```
+
+#### Scoop
+
+```powershell
+scoop install .\packaging\scoop\wstrace.json
+```
 
 ---
 
@@ -121,7 +138,7 @@ wstrace -m stream [-d <seconds>] run <executable_path>
 
 ---
 
-> 📖 **Comprehensive Manual & Advanced Options:**
+> **Comprehensive Manual & Advanced Options:**
 > For advanced path filtering (`--include` / `--exclude`), child tracking (`-C`), JSON reports (`--export-json`), clipboard exports (`--copy`), and scripting options, consult the **[CLI Reference Manual](docs/CLI_REFERENCE.md)** or run `wstrace --help`.
 
 ---
