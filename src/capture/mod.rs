@@ -6,7 +6,10 @@ pub mod qpc;
 pub mod win32_probe;
 
 pub use elevation::{detect_elevation, is_elevated, ElevationLevel};
-pub use error_codes::{format_result_code, lookup_error_code, ErrorInfo, ErrorSeverity};
+pub use error_codes::{
+    format_result_code, lookup_error_code, lookup_ntstatus, lookup_win32_error, ErrorInfo,
+    ErrorSeverity,
+};
 pub use etw::EtwConsumer;
 pub use process_launcher::spawn_target_process;
 pub use qpc::{calculate_elapsed_us, read_qpc_ticks};

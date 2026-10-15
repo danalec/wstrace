@@ -325,8 +325,6 @@ pub fn lookup_ntstatus(status: u32) -> Option<ErrorInfo> {
 pub fn format_result_code(code: u32) -> String {
     if let Some(info) = lookup_error_code(code) {
         format!("{} (0x{:08X})", info.name, code)
-    } else if code == 0 {
-        "SUCCESS (0x00000000)".to_string()
     } else {
         format!("0x{:08X}", code)
     }

@@ -79,16 +79,31 @@ impl TraceEvent {
     }
 
     pub fn with_status_code(mut self, code: u32) -> Self {
-        if let Some(info) = crate::capture::lookup_error_code(code) {
+        let is_nt = self.operation.starts_with("Nt") || self.operation.starts_with("Zw");
+        let resolved = if is_nt {
+            crate::capture::lookup_ntstatus(code)
+                .or_else(|| crate::capture::lookup_win32_error(code))
+        } else {
+            crate::capture::lookup_error_code(code)
+        };
+
+        if let Some(info) = resolved {
             self.result = format!("{} (0x{:08X})", info.name, code);
             self.is_failure = info.severity.is_failure();
         } else {
-            self.result = if code == 0 {
-                "SUCCESS (0x00000000)".to_string()
-            } else {
-                format!("0x{:08X}", code)
-            };
-            self.is_failure = code != 0;
+            self.result = format!("0x{:08X}", code);
+            self.is_failure = true;
+        }
+        self
+    }
+
+    pub fn with_ntstatus(mut self, status: u32) -> Self {
+        if let Some(info) = crate::capture::lookup_ntstatus(status) {
+            self.result = format!("{} (0x{:08X})", info.name, status);
+            self.is_failure = info.severity.is_failure();
+        } else {
+            self.result = format!("0x{:08X}", status);
+            self.is_failure = status != 0;
         }
         self
     }
