@@ -1,8 +1,8 @@
-// wstrace - Real-Time Unprivileged Network Probe (TCP / UDP via IP Helper)
+// wstrace - Real-Time Unprivileged Network Probe (TCP / UDP IPv4 + IPv6 via IP Helper)
 
 use std::collections::HashSet;
 use std::ffi::c_void;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -12,10 +12,11 @@ use chrono::Local;
 use crossbeam_channel::Sender;
 use windows_sys::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, NO_ERROR};
 use windows_sys::Win32::NetworkManagement::IpHelper::{
-    GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
+    GetExtendedTcpTable, GetExtendedUdpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID,
+    MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, MIB_UDP6ROW_OWNER_PID, MIB_UDP6TABLE_OWNER_PID,
     MIB_UDPROW_OWNER_PID, MIB_UDPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_ALL, UDP_TABLE_OWNER_PID,
 };
-use windows_sys::Win32::Networking::WinSock::AF_INET;
+use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 
 use crate::event::{EventCategory, TraceEvent};
 
@@ -125,130 +126,213 @@ impl NetworkProbe {
 pub fn query_active_sockets(filter_pid: u32) -> HashSet<SocketRecord> {
     let mut records = HashSet::new();
 
-    // Query IPv4 TCP Connections
+    // Query IPv4 and IPv6 TCP connections
     query_tcp_ipv4(filter_pid, &mut records);
+    query_tcp_ipv6(filter_pid, &mut records);
 
-    // Query IPv4 UDP Listeners / Endpoints
+    // Query IPv4 and IPv6 UDP endpoints
     query_udp_ipv4(filter_pid, &mut records);
+    query_udp_ipv6(filter_pid, &mut records);
 
     records
 }
 
-fn query_tcp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
+/// Fetches extended TCP table with 8-byte alignment (Vec<u64>) and TOCTOU retry loop.
+fn fetch_extended_tcp_table(family: u32) -> Option<Vec<u64>> {
     let mut buffer_size: u32 = 0;
+    let mut buffer: Vec<u64> = Vec::new();
 
-    unsafe {
-        let ret = GetExtendedTcpTable(
-            std::ptr::null_mut(),
-            &mut buffer_size,
-            0,
-            AF_INET as u32,
-            TCP_TABLE_OWNER_PID_ALL,
-            0,
-        );
+    for _ in 0..4 {
+        let ret = unsafe {
+            GetExtendedTcpTable(
+                buffer.as_mut_ptr() as *mut c_void,
+                &mut buffer_size,
+                0,
+                family,
+                TCP_TABLE_OWNER_PID_ALL,
+                0,
+            )
+        };
 
-        if ret != ERROR_INSUFFICIENT_BUFFER {
-            return;
+        if ret == NO_ERROR {
+            return Some(buffer);
         }
 
-        let mut buffer = vec![0u8; buffer_size as usize];
-        let ret = GetExtendedTcpTable(
-            buffer.as_mut_ptr() as *mut c_void,
-            &mut buffer_size,
-            0,
-            AF_INET as u32,
-            TCP_TABLE_OWNER_PID_ALL,
-            0,
-        );
-
-        if ret != NO_ERROR {
-            return;
+        if ret == ERROR_INSUFFICIENT_BUFFER {
+            // Over-allocate with 4KB (512 u64s) headroom to eliminate TOCTOU races under connection churn
+            let words = (buffer_size as usize).div_ceil(8) + 512;
+            buffer.resize(words, 0);
+            buffer_size = (buffer.len() * 8) as u32;
+            continue;
         }
 
-        let table = buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
-        let num_entries = (*table).dwNumEntries as usize;
-        let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCPROW_OWNER_PID;
+        break;
+    }
 
-        for i in 0..num_entries {
-            let row = *rows_ptr.add(i);
+    None
+}
 
-            if filter_pid != 0 && row.dwOwningPid != filter_pid {
-                continue;
+/// Fetches extended UDP table with 8-byte alignment (Vec<u64>) and TOCTOU retry loop.
+fn fetch_extended_udp_table(family: u32) -> Option<Vec<u64>> {
+    let mut buffer_size: u32 = 0;
+    let mut buffer: Vec<u64> = Vec::new();
+
+    for _ in 0..4 {
+        let ret = unsafe {
+            GetExtendedUdpTable(
+                buffer.as_mut_ptr() as *mut c_void,
+                &mut buffer_size,
+                0,
+                family,
+                UDP_TABLE_OWNER_PID,
+                0,
+            )
+        };
+
+        if ret == NO_ERROR {
+            return Some(buffer);
+        }
+
+        if ret == ERROR_INSUFFICIENT_BUFFER {
+            // Over-allocate with 4KB (512 u64s) headroom
+            let words = (buffer_size as usize).div_ceil(8) + 512;
+            buffer.resize(words, 0);
+            buffer_size = (buffer.len() * 8) as u32;
+            continue;
+        }
+
+        break;
+    }
+
+    None
+}
+
+fn query_tcp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
+    if let Some(buffer) = fetch_extended_tcp_table(AF_INET as u32) {
+        unsafe {
+            let table = buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
+            let num_entries = (*table).dwNumEntries as usize;
+            let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCPROW_OWNER_PID;
+
+            for i in 0..num_entries {
+                let row = std::ptr::read_unaligned(rows_ptr.add(i));
+
+                if filter_pid != 0 && row.dwOwningPid != filter_pid {
+                    continue;
+                }
+
+                let local_ip = Ipv4Addr::from(u32::from_be(row.dwLocalAddr)).to_string();
+                let local_port = u16::from_be((row.dwLocalPort & 0xFFFF) as u16);
+                let remote_ip = Ipv4Addr::from(u32::from_be(row.dwRemoteAddr)).to_string();
+                let remote_port = u16::from_be((row.dwRemotePort & 0xFFFF) as u16);
+                let state = tcp_state_to_str(row.dwState).to_string();
+
+                records.insert(SocketRecord {
+                    protocol: "TCP",
+                    local_addr: local_ip,
+                    local_port,
+                    remote_addr: remote_ip,
+                    remote_port,
+                    state,
+                    pid: row.dwOwningPid,
+                });
             }
+        }
+    }
+}
 
-            let local_ip = Ipv4Addr::from(u32::from_be(row.dwLocalAddr)).to_string();
-            let local_port = u16::from_be((row.dwLocalPort & 0xFFFF) as u16);
-            let remote_ip = Ipv4Addr::from(u32::from_be(row.dwRemoteAddr)).to_string();
-            let remote_port = u16::from_be((row.dwRemotePort & 0xFFFF) as u16);
-            let state = tcp_state_to_str(row.dwState).to_string();
+fn query_tcp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
+    if let Some(buffer) = fetch_extended_tcp_table(AF_INET6 as u32) {
+        unsafe {
+            let table = buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID;
+            let num_entries = (*table).dwNumEntries as usize;
+            let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_TCP6ROW_OWNER_PID;
 
-            records.insert(SocketRecord {
-                protocol: "TCP",
-                local_addr: local_ip,
-                local_port,
-                remote_addr: remote_ip,
-                remote_port,
-                state,
-                pid: row.dwOwningPid,
-            });
+            for i in 0..num_entries {
+                let row = std::ptr::read_unaligned(rows_ptr.add(i));
+
+                if filter_pid != 0 && row.dwOwningPid != filter_pid {
+                    continue;
+                }
+
+                let local_ip = Ipv6Addr::from(row.ucLocalAddr).to_string();
+                let local_port = u16::from_be((row.dwLocalPort & 0xFFFF) as u16);
+                let remote_ip = Ipv6Addr::from(row.ucRemoteAddr).to_string();
+                let remote_port = u16::from_be((row.dwRemotePort & 0xFFFF) as u16);
+                let state = tcp_state_to_str(row.dwState).to_string();
+
+                records.insert(SocketRecord {
+                    protocol: "TCP",
+                    local_addr: local_ip,
+                    local_port,
+                    remote_addr: remote_ip,
+                    remote_port,
+                    state,
+                    pid: row.dwOwningPid,
+                });
+            }
         }
     }
 }
 
 fn query_udp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
-    let mut buffer_size: u32 = 0;
+    if let Some(buffer) = fetch_extended_udp_table(AF_INET as u32) {
+        unsafe {
+            let table = buffer.as_ptr() as *const MIB_UDPTABLE_OWNER_PID;
+            let num_entries = (*table).dwNumEntries as usize;
+            let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_UDPROW_OWNER_PID;
 
-    unsafe {
-        let ret = GetExtendedUdpTable(
-            std::ptr::null_mut(),
-            &mut buffer_size,
-            0,
-            AF_INET as u32,
-            UDP_TABLE_OWNER_PID,
-            0,
-        );
+            for i in 0..num_entries {
+                let row = std::ptr::read_unaligned(rows_ptr.add(i));
 
-        if ret != ERROR_INSUFFICIENT_BUFFER {
-            return;
-        }
+                if filter_pid != 0 && row.dwOwningPid != filter_pid {
+                    continue;
+                }
 
-        let mut buffer = vec![0u8; buffer_size as usize];
-        let ret = GetExtendedUdpTable(
-            buffer.as_mut_ptr() as *mut c_void,
-            &mut buffer_size,
-            0,
-            AF_INET as u32,
-            UDP_TABLE_OWNER_PID,
-            0,
-        );
+                let local_ip = Ipv4Addr::from(u32::from_be(row.dwLocalAddr)).to_string();
+                let local_port = u16::from_be((row.dwLocalPort & 0xFFFF) as u16);
 
-        if ret != NO_ERROR {
-            return;
-        }
-
-        let table = buffer.as_ptr() as *const MIB_UDPTABLE_OWNER_PID;
-        let num_entries = (*table).dwNumEntries as usize;
-        let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_UDPROW_OWNER_PID;
-
-        for i in 0..num_entries {
-            let row = *rows_ptr.add(i);
-
-            if filter_pid != 0 && row.dwOwningPid != filter_pid {
-                continue;
+                records.insert(SocketRecord {
+                    protocol: "UDP",
+                    local_addr: local_ip,
+                    local_port,
+                    remote_addr: "*".to_string(),
+                    remote_port: 0,
+                    state: "BOUND".to_string(),
+                    pid: row.dwOwningPid,
+                });
             }
+        }
+    }
+}
 
-            let local_ip = Ipv4Addr::from(u32::from_be(row.dwLocalAddr)).to_string();
-            let local_port = u16::from_be((row.dwLocalPort & 0xFFFF) as u16);
+fn query_udp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
+    if let Some(buffer) = fetch_extended_udp_table(AF_INET6 as u32) {
+        unsafe {
+            let table = buffer.as_ptr() as *const MIB_UDP6TABLE_OWNER_PID;
+            let num_entries = (*table).dwNumEntries as usize;
+            let rows_ptr = std::ptr::addr_of!((*table).table) as *const MIB_UDP6ROW_OWNER_PID;
 
-            records.insert(SocketRecord {
-                protocol: "UDP",
-                local_addr: local_ip,
-                local_port,
-                remote_addr: "*".to_string(),
-                remote_port: 0,
-                state: "BOUND".to_string(),
-                pid: row.dwOwningPid,
-            });
+            for i in 0..num_entries {
+                let row = std::ptr::read_unaligned(rows_ptr.add(i));
+
+                if filter_pid != 0 && row.dwOwningPid != filter_pid {
+                    continue;
+                }
+
+                let local_ip = Ipv6Addr::from(row.ucLocalAddr).to_string();
+                let local_port = u16::from_be((row.dwLocalPort & 0xFFFF) as u16);
+
+                records.insert(SocketRecord {
+                    protocol: "UDP",
+                    local_addr: local_ip,
+                    local_port,
+                    remote_addr: "*".to_string(),
+                    remote_port: 0,
+                    state: "BOUND".to_string(),
+                    pid: row.dwOwningPid,
+                });
+            }
         }
     }
 }
