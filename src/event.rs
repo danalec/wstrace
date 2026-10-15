@@ -67,6 +67,26 @@ impl TraceEvent {
             details: String::new(),
         }
     }
+
+    pub fn with_duration(mut self, duration_us: u64) -> Self {
+        self.duration_us = duration_us;
+        self
+    }
+
+    pub fn with_details(mut self, details: impl Into<String>) -> Self {
+        self.details = details.into();
+        self
+    }
+
+    pub fn with_status_code(mut self, code: u32) -> Self {
+        if let Some(info) = crate::capture::lookup_error_code(code) {
+            self.result = format!("{} (0x{:08X})", info.name, code);
+            self.is_failure = info.severity.is_failure();
+        } else {
+            self.result = crate::capture::format_result_code(code);
+        }
+        self
+    }
 }
 
 #[cfg(test)]
