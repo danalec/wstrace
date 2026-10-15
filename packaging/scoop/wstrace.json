@@ -1,21 +1,28 @@
 {
-  "version": "0.2.2",
-  "description": "High-performance zero-driver Windows system and API monitor in Rust",
-  "homepage": "https://github.com/gilnett/wstrace",
-  "license": "GPL-3.0-or-later",
-  "architecture": {
-    "64bit": {
-      "url": "https://github.com/gilnett/wstrace/releases/download/v0.2.2/wstrace-v0.2.2-windows-x86_64.zip",
-      "hash": "3e935269c7ef1c900711a1b8c2bfd178fbfe4ec5bc61eec63307852d7597c25d"
-    }
-  },
-  "bin": "wstrace.exe",
-  "checkver": "github",
-  "autoupdate": {
+    "version": "0.2.2",
+    "description": "High-performance zero-driver Windows system and API monitor in Rust",
+    "homepage": "https://github.com/gilnett/wstrace",
+    "license": "GPL-3.0-or-later",
     "architecture": {
-      "64bit": {
-        "url": "https://github.com/gilnett/wstrace/releases/download/v$version/wstrace-v$version-windows-x86_64.zip"
-      }
+        "64bit": {
+            "url": "https://github.com/gilnett/wstrace/releases/download/v0.2.2/wstrace-v0.2.2-windows-x86_64.zip",
+            "hash": "3e935269c7ef1c900711a1b8c2bfd178fbfe4ec5bc61eec63307852d7597c25d"
+        },
+        "arm64": {
+            "url": "https://github.com/gilnett/wstrace/releases/download/v0.2.2/wstrace-v0.2.2-windows-aarch64.zip",
+            "hash": "1f94f9cbc798adb72e1de6e15613be47323fad5e0f55402b1e6481bf432531eb"
+        }
+    },
+    "bin": "wstrace.exe",
+    "checkver": "github",
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/gilnett/wstrace/releases/download/v$version/wstrace-v$version-windows-x86_64.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/gilnett/wstrace/releases/download/v$version/wstrace-v$version-windows-aarch64.zip"
+            }
+        }
     }
-  }
 }
