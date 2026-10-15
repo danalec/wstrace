@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use crossbeam_channel::unbounded;
 
-use wstrace::capture::{spawn_target_process, EtwConsumer, Win32Probe};
+use wstrace::capture::{spawn_target_process, EtwConsumer, NetworkProbe, Win32Probe};
 use wstrace::cli::{Cli, Commands, OutputMode};
 use wstrace::event::TraceEvent;
 use wstrace::output;
@@ -67,6 +67,9 @@ fn main() -> Result<()> {
     let probe = Win32Probe::new(target_pid, target_name.clone(), track_children);
     probe.start_monitor(event_tx.clone());
 
+    let network_probe = NetworkProbe::new(target_pid, target_name.clone());
+    network_probe.start(event_tx.clone());
+
     let etw = EtwConsumer::new(target_pid);
     etw.start(event_tx.clone());
 
@@ -90,6 +93,7 @@ fn main() -> Result<()> {
 
     // Stop probes
     probe.stop();
+    network_probe.stop();
     etw.stop();
 
     // Summary counters display

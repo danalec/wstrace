@@ -25,6 +25,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Memory",
     "Win32_System_Performance",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Networking_WinSock",
 ] }
 crossterm = "0.29"
 ratatui = "0.30"
