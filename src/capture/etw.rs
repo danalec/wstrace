@@ -52,8 +52,6 @@ pub const KERNEL_PROC_GUID: GUID = GUID {
     data4: [0xa0, 0xc7, 0x2f, 0xad, 0x1f, 0xd0, 0xe7, 0x16],
 };
 
-const SESSION_NAME: &str = "wstrace-kernel-session\0";
-
 struct CallbackState {
     filter_pid: u32,
     event_tx: Sender<TraceEvent>,
@@ -65,6 +63,7 @@ pub struct EtwConsumer {
     running: Arc<AtomicBool>,
     is_elevated: bool,
     session_handle: Arc<AtomicU64>,
+    session_name: String,
 }
 
 impl EtwConsumer {
@@ -74,16 +73,22 @@ impl EtwConsumer {
     }
 
     pub fn with_elevation(pid: u32, is_elevated: bool) -> Self {
+        let session_name = format!("wstrace-kernel-session-{}\0", std::process::id());
         Self {
             pid,
             running: Arc::new(AtomicBool::new(true)),
             is_elevated,
             session_handle: Arc::new(AtomicU64::new(0)),
+            session_name,
         }
     }
 
     pub fn is_elevated(&self) -> bool {
         self.is_elevated
+    }
+
+    pub fn session_name(&self) -> &str {
+        &self.session_name
     }
 
     pub fn start(&self, event_tx: Sender<TraceEvent>) {
@@ -96,10 +101,11 @@ impl EtwConsumer {
         let pid = self.pid;
         let running = Arc::clone(&self.running);
         let session_holder = Arc::clone(&self.session_handle);
+        let session_name = self.session_name.clone();
 
         thread::spawn(move || {
-            let session_name_utf16: Vec<u16> = SESSION_NAME.encode_utf16().collect();
-            let mut props_buffer = allocate_session_properties(SESSION_NAME);
+            let session_name_utf16: Vec<u16> = session_name.encode_utf16().collect();
+            let mut props_buffer = allocate_session_properties(&session_name);
             let props = props_buffer.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES;
 
             // Stop any dangling previous session with the same name
@@ -113,7 +119,7 @@ impl EtwConsumer {
             }
 
             // Reset properties before StartTraceW
-            let mut props_buffer = allocate_session_properties(SESSION_NAME);
+            let mut props_buffer = allocate_session_properties(&session_name);
             let props = props_buffer.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES;
 
             let mut session_handle = CONTROLTRACE_HANDLE { Value: 0 };
@@ -178,7 +184,7 @@ impl EtwConsumer {
                 thread::sleep(Duration::from_millis(100));
             }
 
-            let mut stop_props_buffer = allocate_session_properties(SESSION_NAME);
+            let mut stop_props_buffer = allocate_session_properties(&session_name);
             let stop_props = stop_props_buffer.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES;
             unsafe {
                 ControlTraceW(
@@ -195,8 +201,8 @@ impl EtwConsumer {
         self.running.store(false, Ordering::Relaxed);
         let session_val = self.session_handle.load(Ordering::SeqCst);
         if session_val != 0 {
-            let session_name_utf16: Vec<u16> = SESSION_NAME.encode_utf16().collect();
-            let mut stop_props_buffer = allocate_session_properties(SESSION_NAME);
+            let session_name_utf16: Vec<u16> = self.session_name.encode_utf16().collect();
+            let mut stop_props_buffer = allocate_session_properties(&self.session_name);
             let stop_props = stop_props_buffer.as_mut_ptr() as *mut EVENT_TRACE_PROPERTIES;
             unsafe {
                 ControlTraceW(
@@ -333,12 +339,21 @@ mod tests {
 
     #[test]
     fn test_allocate_session_properties_buffer() {
-        let buffer = allocate_session_properties(SESSION_NAME);
+        let buffer = allocate_session_properties("test-session\0");
         assert!(buffer.len() > size_of::<EVENT_TRACE_PROPERTIES>());
         let props = buffer.as_ptr() as *const EVENT_TRACE_PROPERTIES;
         unsafe {
             assert_eq!((*props).LogFileMode, EVENT_TRACE_REAL_TIME_MODE);
             assert_eq!((*props).Wnode.ClientContext, 1);
         }
+    }
+
+    #[test]
+    fn test_etw_session_name_includes_pid() {
+        let consumer = EtwConsumer::new(0);
+        assert!(consumer
+            .session_name()
+            .starts_with("wstrace-kernel-session-"));
+        assert!(consumer.session_name().ends_with('\0'));
     }
 }
