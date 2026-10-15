@@ -45,11 +45,26 @@ Run in PowerShell to automatically install the latest release to `$HOME\.local\b
 irm https://raw.githubusercontent.com/gilnett/wstrace/main/packaging/install.ps1 | iex
 ```
 
-### 2. Standalone Binary (GitHub Releases)
+### 2. Scoop Package Manager
+
+Install via the personal bucket:
+
+```powershell
+scoop bucket add gilnett https://github.com/gilnett/scoop-bucket
+scoop install wstrace
+```
+
+Or install directly via URL:
+
+```powershell
+scoop install https://raw.githubusercontent.com/gilnett/wstrace/main/packaging/scoop/wstrace.json
+```
+
+### 3. Standalone Binary (GitHub Releases)
 
 Download precompiled standalone binaries from [GitHub Releases](https://github.com/gilnett/wstrace/releases).
 
-### 3. Cargo (From Source)
+### 4. Cargo (From Source)
 
 Install directly from GitHub:
 
