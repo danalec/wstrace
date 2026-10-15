@@ -121,4 +121,34 @@ fn test_event_builder_methods() {
 
     assert_eq!(event_explicit_nt.result, "STATUS_SUCCESS (0x00000000)");
     assert!(!event_explicit_nt.is_failure);
+
+    let event_unmapped_nt_info = TraceEvent::new(
+        7,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "NtQueryInformationFile",
+        "C:\\file.txt",
+        "",
+        false,
+    )
+    .with_status_code(0x4000_0999);
+
+    assert_eq!(event_unmapped_nt_info.result, "0x40000999");
+    assert!(!event_unmapped_nt_info.is_failure);
+
+    let event_unmapped_nt_warn = TraceEvent::new(
+        8,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "NtReadFile",
+        "C:\\file.txt",
+        "",
+        false,
+    )
+    .with_status_code(0x8000_0999);
+
+    assert_eq!(event_unmapped_nt_warn.result, "0x80000999");
+    assert!(event_unmapped_nt_warn.is_failure);
 }

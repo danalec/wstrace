@@ -92,7 +92,11 @@ impl TraceEvent {
             self.is_failure = info.severity.is_failure();
         } else {
             self.result = format!("0x{:08X}", code);
-            self.is_failure = true;
+            self.is_failure = if is_nt {
+                code >= 0x8000_0000
+            } else {
+                code != 0
+            };
         }
         self
     }
@@ -103,7 +107,7 @@ impl TraceEvent {
             self.is_failure = info.severity.is_failure();
         } else {
             self.result = format!("0x{:08X}", status);
-            self.is_failure = status != 0;
+            self.is_failure = status >= 0x8000_0000;
         }
         self
     }
