@@ -52,11 +52,14 @@ impl NetworkProbe {
         let running = Arc::clone(&self.running);
 
         thread::spawn(move || {
-            let mut known_sockets: HashSet<SocketRecord> = HashSet::new();
+            // Pre-allocate collections and raw buffer to eliminate allocator pressure in polling loop
+            let mut known_sockets: HashSet<SocketRecord> = HashSet::with_capacity(128);
+            let mut current_sockets: HashSet<SocketRecord> = HashSet::with_capacity(128);
+            let mut raw_buffer: Vec<u64> = Vec::with_capacity(2048);
             let mut event_id_counter: u64 = 50_000_000;
 
             while running.load(Ordering::Relaxed) {
-                let current_sockets = query_active_sockets(monitored_pid);
+                query_active_sockets_into(monitored_pid, &mut current_sockets, &mut raw_buffer);
 
                 for sock in &current_sockets {
                     if !known_sockets.contains(sock) {
@@ -110,8 +113,8 @@ impl NetworkProbe {
                     }
                 }
 
-                // Retain only currently active sockets to detect reconnection cycles
-                known_sockets = current_sockets;
+                // Swap sets to preserve capacity and avoid heap allocations across iterations
+                std::mem::swap(&mut known_sockets, &mut current_sockets);
 
                 thread::sleep(Duration::from_millis(250));
             }
@@ -123,24 +126,33 @@ impl NetworkProbe {
     }
 }
 
-pub fn query_active_sockets(filter_pid: u32) -> HashSet<SocketRecord> {
-    let mut records = HashSet::new();
+/// Populates an existing HashSet with active sockets using a reusable raw buffer.
+pub fn query_active_sockets_into(
+    filter_pid: u32,
+    records: &mut HashSet<SocketRecord>,
+    raw_buffer: &mut Vec<u64>,
+) {
+    records.clear();
 
     // Query IPv4 and IPv6 TCP connections
-    query_tcp_ipv4(filter_pid, &mut records);
-    query_tcp_ipv6(filter_pid, &mut records);
+    query_tcp_ipv4(filter_pid, records, raw_buffer);
+    query_tcp_ipv6(filter_pid, records, raw_buffer);
 
     // Query IPv4 and IPv6 UDP endpoints
-    query_udp_ipv4(filter_pid, &mut records);
-    query_udp_ipv6(filter_pid, &mut records);
+    query_udp_ipv4(filter_pid, records, raw_buffer);
+    query_udp_ipv6(filter_pid, records, raw_buffer);
+}
 
+pub fn query_active_sockets(filter_pid: u32) -> HashSet<SocketRecord> {
+    let mut records = HashSet::with_capacity(128);
+    let mut buffer = Vec::with_capacity(2048);
+    query_active_sockets_into(filter_pid, &mut records, &mut buffer);
     records
 }
 
-/// Fetches extended TCP table with 8-byte alignment (Vec<u64>) and TOCTOU retry loop.
-fn fetch_extended_tcp_table(family: u32) -> Option<Vec<u64>> {
-    let mut buffer_size: u32 = 0;
-    let mut buffer: Vec<u64> = Vec::new();
+/// Fetches extended TCP table with 8-byte alignment (Vec<u64>) and TOCTOU retry loop into a reusable buffer.
+fn fetch_extended_tcp_table(family: u32, buffer: &mut Vec<u64>) -> bool {
+    let mut buffer_size: u32 = (buffer.len() * 8) as u32;
 
     for _ in 0..4 {
         let ret = unsafe {
@@ -155,7 +167,7 @@ fn fetch_extended_tcp_table(family: u32) -> Option<Vec<u64>> {
         };
 
         if ret == NO_ERROR {
-            return Some(buffer);
+            return true;
         }
 
         if ret == ERROR_INSUFFICIENT_BUFFER {
@@ -169,13 +181,12 @@ fn fetch_extended_tcp_table(family: u32) -> Option<Vec<u64>> {
         break;
     }
 
-    None
+    false
 }
 
-/// Fetches extended UDP table with 8-byte alignment (Vec<u64>) and TOCTOU retry loop.
-fn fetch_extended_udp_table(family: u32) -> Option<Vec<u64>> {
-    let mut buffer_size: u32 = 0;
-    let mut buffer: Vec<u64> = Vec::new();
+/// Fetches extended UDP table with 8-byte alignment (Vec<u64>) and TOCTOU retry loop into a reusable buffer.
+fn fetch_extended_udp_table(family: u32, buffer: &mut Vec<u64>) -> bool {
+    let mut buffer_size: u32 = (buffer.len() * 8) as u32;
 
     for _ in 0..4 {
         let ret = unsafe {
@@ -190,7 +201,7 @@ fn fetch_extended_udp_table(family: u32) -> Option<Vec<u64>> {
         };
 
         if ret == NO_ERROR {
-            return Some(buffer);
+            return true;
         }
 
         if ret == ERROR_INSUFFICIENT_BUFFER {
@@ -204,11 +215,11 @@ fn fetch_extended_udp_table(family: u32) -> Option<Vec<u64>> {
         break;
     }
 
-    None
+    false
 }
 
-fn query_tcp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
-    if let Some(buffer) = fetch_extended_tcp_table(AF_INET as u32) {
+fn query_tcp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>, buffer: &mut Vec<u64>) {
+    if fetch_extended_tcp_table(AF_INET as u32, buffer) {
         unsafe {
             let table = buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID;
             let num_entries = (*table).dwNumEntries as usize;
@@ -241,8 +252,8 @@ fn query_tcp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
     }
 }
 
-fn query_tcp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
-    if let Some(buffer) = fetch_extended_tcp_table(AF_INET6 as u32) {
+fn query_tcp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>, buffer: &mut Vec<u64>) {
+    if fetch_extended_tcp_table(AF_INET6 as u32, buffer) {
         unsafe {
             let table = buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID;
             let num_entries = (*table).dwNumEntries as usize;
@@ -275,8 +286,8 @@ fn query_tcp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
     }
 }
 
-fn query_udp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
-    if let Some(buffer) = fetch_extended_udp_table(AF_INET as u32) {
+fn query_udp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>, buffer: &mut Vec<u64>) {
+    if fetch_extended_udp_table(AF_INET as u32, buffer) {
         unsafe {
             let table = buffer.as_ptr() as *const MIB_UDPTABLE_OWNER_PID;
             let num_entries = (*table).dwNumEntries as usize;
@@ -306,8 +317,8 @@ fn query_udp_ipv4(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
     }
 }
 
-fn query_udp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>) {
-    if let Some(buffer) = fetch_extended_udp_table(AF_INET6 as u32) {
+fn query_udp_ipv6(filter_pid: u32, records: &mut HashSet<SocketRecord>, buffer: &mut Vec<u64>) {
+    if fetch_extended_udp_table(AF_INET6 as u32, buffer) {
         unsafe {
             let table = buffer.as_ptr() as *const MIB_UDP6TABLE_OWNER_PID;
             let num_entries = (*table).dwNumEntries as usize;
@@ -374,6 +385,15 @@ mod tests {
         let current_pid = std::process::id();
         let sockets = query_active_sockets(current_pid);
         // Current test process may or may not have open sockets, but call must not panic
+        let _ = sockets.len();
+    }
+
+    #[test]
+    fn test_query_active_sockets_into_reusable_buffers() {
+        let current_pid = std::process::id();
+        let mut sockets = HashSet::with_capacity(64);
+        let mut buffer = Vec::with_capacity(1024);
+        query_active_sockets_into(current_pid, &mut sockets, &mut buffer);
         let _ = sockets.len();
     }
 
