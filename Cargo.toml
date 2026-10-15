@@ -24,6 +24,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_Memory",
+    "Win32_System_Performance",
 ] }
 crossterm = "0.29"
 ratatui = "0.30"

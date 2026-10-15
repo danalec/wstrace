@@ -40,3 +40,25 @@ fn test_event_lifecycle_and_serialization() {
     assert_eq!(deserialized.result, event.result);
     assert_eq!(deserialized.is_failure, event.is_failure);
 }
+
+#[test]
+fn test_event_builder_methods() {
+    let event = TraceEvent::new(
+        2,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "NtOpenFile",
+        "C:\\secret.txt",
+        "",
+        false,
+    )
+    .with_duration(150)
+    .with_details("handle=0x123")
+    .with_status_code(5); // ERROR_ACCESS_DENIED
+
+    assert_eq!(event.duration_us, 150);
+    assert_eq!(event.details, "handle=0x123");
+    assert_eq!(event.result, "ERROR_ACCESS_DENIED (0x00000005)");
+    assert!(event.is_failure);
+}

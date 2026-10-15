@@ -46,8 +46,13 @@ fn main() -> Result<()> {
         Commands::All => (0, "SYSTEM-WIDE".to_string()),
     };
 
+    let elevation = wstrace::capture::detect_elevation();
     if args.mode == OutputMode::Stream {
+        println!("[INFO] Privilege level: {}", elevation.as_str());
         if target_pid == 0 {
+            if !elevation.is_elevated() {
+                println!("[WARN] System-wide trace running without Administrator elevation; restricted to current user session.");
+            }
             println!("[INFO] Monitoring all system processes (System-wide trace)");
         } else {
             println!("[INFO] Monitoring '{}' (PID: {})", target_name, target_pid);
