@@ -83,7 +83,12 @@ impl TraceEvent {
             self.result = format!("{} (0x{:08X})", info.name, code);
             self.is_failure = info.severity.is_failure();
         } else {
-            self.result = crate::capture::format_result_code(code);
+            self.result = if code == 0 {
+                "SUCCESS (0x00000000)".to_string()
+            } else {
+                format!("0x{:08X}", code)
+            };
+            self.is_failure = code != 0;
         }
         self
     }
