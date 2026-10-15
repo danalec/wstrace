@@ -1,6 +1,7 @@
 pub mod elevation;
 pub mod error_codes;
 pub mod etw;
+pub mod network_probe;
 pub mod process_launcher;
 pub mod qpc;
 pub mod win32_probe;
@@ -11,6 +12,7 @@ pub use error_codes::{
     ErrorSeverity,
 };
 pub use etw::EtwConsumer;
+pub use network_probe::NetworkProbe;
 pub use process_launcher::spawn_target_process;
 pub use qpc::{calculate_elapsed_us, read_qpc_ticks};
 pub use win32_probe::Win32Probe;

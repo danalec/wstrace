@@ -1,28 +1,24 @@
 // wstrace - Hardware QueryPerformanceCounter (QPC) Timestamps & Microsecond Latency
 
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::OnceLock;
 use windows_sys::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 
-static QPC_FREQUENCY: AtomicI64 = AtomicI64::new(0);
+static QPC_FREQUENCY: OnceLock<i64> = OnceLock::new();
 
 /// Initializes and returns the QPC hardware frequency in counts per second.
 /// Caches the frequency atomically to avoid repeated syscalls.
 pub fn get_qpc_frequency() -> i64 {
-    let cached = QPC_FREQUENCY.load(Ordering::Relaxed);
-    if cached > 0 {
-        return cached;
-    }
-
-    let mut freq: i64 = 0;
-    unsafe {
-        if QueryPerformanceFrequency(&mut freq) != 0 && freq > 0 {
-            QPC_FREQUENCY.store(freq, Ordering::Relaxed);
-            freq
-        } else {
-            // Fallback frequency (10 MHz is typical on modern Windows systems)
-            10_000_000
+    *QPC_FREQUENCY.get_or_init(|| {
+        let mut freq: i64 = 0;
+        unsafe {
+            if QueryPerformanceFrequency(&mut freq) != 0 && freq > 0 {
+                freq
+            } else {
+                // Fallback frequency (10 MHz is typical on modern Windows systems)
+                10_000_000
+            }
         }
-    }
+    })
 }
 
 /// Returns the current hardware performance counter value (ticks).
