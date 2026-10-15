@@ -20,6 +20,21 @@
 
 ---
 
+## Architectural FAQ
+
+### Why zero kernel drivers?
+Third-party kernel drivers (`.sys`) risk system crashes (BSOD), expand the attack surface, and require driver-signing exemptions prohibited in enterprise environments. `wstrace` runs 100% in userland using non-invasive Win32 debugging APIs and native Windows ETW interfaces.
+
+### Why is Administrator elevation not required?
+Standard user accounts can run and trace any target via `wstrace run <binary>`. Spawned child processes inherit debugging handles (`PROCESS_ALL_ACCESS`) directly without UAC prompts. Telemetry for modules, threads, sockets, and I/O relies entirely on unprivileged Win32 APIs.
+
+### Why does elevation remain a benefit if present?
+Elevation is an **accelerator, not a gate**:
+- **Standard User (Default):** Complete tracing for `run`, `attach` (user session), child processes (`-C`), interactive TUI, and streaming.
+- **Administrator:** Unlocks system-wide kernel ETW and cross-session inspection (`wstrace all`) to monitor background OS services and system daemons.
+
+---
+
 ## Installation
 
 ### 1. PowerShell One-Liner (Zero-Clone)
@@ -57,16 +72,11 @@ The resulting binary is located at `target\release\wstrace.exe`.
 
 #### Windows Package Manager (Winget)
 
-Once published in the official [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) repository:
+> [!NOTE]
+> The official package submission is currently undergoing review and verification on [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs/pull/451727). Once approved and merged by community moderators, it will be installable directly via:
 
 ```powershell
 winget install gilnett.wstrace
-```
-
-To test locally using the repository manifest:
-
-```powershell
-winget install --manifest .\packaging\winget\wstrace.yaml
 ```
 
 #### Scoop
