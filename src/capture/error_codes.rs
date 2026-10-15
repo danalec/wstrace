@@ -34,6 +34,9 @@ pub struct ErrorInfo {
 }
 
 /// Resolves a Win32 error code or NTSTATUS code to its structured metadata.
+///
+/// Note: Code `0` is resolved as `ERROR_SUCCESS` via the Win32 lookup table fallback.
+/// When NTSTATUS context is explicitly required, caller should use `lookup_ntstatus(0)`.
 pub fn lookup_error_code(code: u32) -> Option<ErrorInfo> {
     // Check NTSTATUS codes first (top 2 bits set or 0xC000xxxx / 0x8000xxxx / 0x4000xxxx)
     if code >= 0x4000_0000 || (0x0000_0100..=0x0000_0105).contains(&code) {
@@ -337,6 +340,14 @@ mod tests {
     fn test_lookup_win32_success() {
         let info = lookup_win32_error(0).expect("ERROR_SUCCESS should resolve");
         assert_eq!(info.name, "ERROR_SUCCESS");
+        assert_eq!(info.severity, ErrorSeverity::Success);
+        assert!(!info.severity.is_failure());
+    }
+
+    #[test]
+    fn test_lookup_ntstatus_success() {
+        let info = lookup_ntstatus(0).expect("STATUS_SUCCESS should resolve");
+        assert_eq!(info.name, "STATUS_SUCCESS");
         assert_eq!(info.severity, ErrorSeverity::Success);
         assert!(!info.severity.is_failure());
     }

@@ -61,4 +61,34 @@ fn test_event_builder_methods() {
     assert_eq!(event.details, "handle=0x123");
     assert_eq!(event.result, "ERROR_ACCESS_DENIED (0x00000005)");
     assert!(event.is_failure);
+
+    let event_unmapped = TraceEvent::new(
+        3,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "NtOpenFile",
+        "C:\\file.txt",
+        "",
+        false,
+    )
+    .with_status_code(0xC000_0999);
+
+    assert_eq!(event_unmapped.result, "0xC0000999");
+    assert!(event_unmapped.is_failure);
+
+    let event_zero = TraceEvent::new(
+        4,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "NtOpenFile",
+        "C:\\file.txt",
+        "",
+        false,
+    )
+    .with_status_code(0);
+
+    assert_eq!(event_zero.result, "ERROR_SUCCESS (0x00000000)");
+    assert!(!event_zero.is_failure);
 }
