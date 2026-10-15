@@ -77,7 +77,7 @@ fn test_event_builder_methods() {
     assert_eq!(event_unmapped.result, "0xC0000999");
     assert!(event_unmapped.is_failure);
 
-    let event_zero = TraceEvent::new(
+    let event_zero_nt = TraceEvent::new(
         4,
         1000,
         1,
@@ -89,6 +89,36 @@ fn test_event_builder_methods() {
     )
     .with_status_code(0);
 
-    assert_eq!(event_zero.result, "ERROR_SUCCESS (0x00000000)");
-    assert!(!event_zero.is_failure);
+    assert_eq!(event_zero_nt.result, "STATUS_SUCCESS (0x00000000)");
+    assert!(!event_zero_nt.is_failure);
+
+    let event_zero_win32 = TraceEvent::new(
+        5,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "CreateFileW",
+        "C:\\file.txt",
+        "",
+        false,
+    )
+    .with_status_code(0);
+
+    assert_eq!(event_zero_win32.result, "ERROR_SUCCESS (0x00000000)");
+    assert!(!event_zero_win32.is_failure);
+
+    let event_explicit_nt = TraceEvent::new(
+        6,
+        1000,
+        1,
+        EventCategory::FileSystem,
+        "CustomFileOp",
+        "C:\\file.txt",
+        "",
+        false,
+    )
+    .with_ntstatus(0);
+
+    assert_eq!(event_explicit_nt.result, "STATUS_SUCCESS (0x00000000)");
+    assert!(!event_explicit_nt.is_failure);
 }

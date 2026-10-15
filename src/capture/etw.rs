@@ -33,12 +33,13 @@ impl EtwConsumer {
         self.is_elevated
     }
 
-    pub fn start(&self, _event_tx: Sender<TraceEvent>) {
+    pub fn start(&self, event_tx: Sender<TraceEvent>) {
         let _pid = self.pid;
         let running = Arc::clone(&self.running);
         let is_elevated = self.is_elevated;
 
         thread::spawn(move || {
+            let _event_tx = event_tx;
             // Full kernel ETW sessions require SeProfileSingleProcessPrivilege / Admin elevation.
             // When unprivileged, consumer operates in user-mode fallback state without panic.
             if !is_elevated {
